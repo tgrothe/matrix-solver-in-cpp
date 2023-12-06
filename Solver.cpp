@@ -4,13 +4,14 @@
 #include <iostream>
 #include <iomanip>
 #include <variant>
-#include <algorithm>
-enum class Unknown
+#include <cmath>
+
+struct Value
 {
-    POSITIVE,
-    NEGATIVE,
+    double value = 0.0;
+    bool is_unknown = false;
 };
-using Value = std::variant<int, Unknown>;
+
 using Row = std::vector<Value>;
 using Matrix = std::vector<std::vector<Value>>;
 
@@ -20,16 +21,20 @@ struct System
     Row constant_terms;
 };
 
-std::ostream &operator<<(std::ostream &out, const Unknown &unknown)
+double round_to(double value, double precision = 0.01)
 {
-    switch (unknown)
+    return std::round(value / precision) * precision;
+}
+
+std::ostream &operator<<(std::ostream &out, const Value &v)
+{
+    if (!v.is_unknown)
     {
-    case Unknown::POSITIVE:
-        out << "++";
-        break;
-    case Unknown::NEGATIVE:
-        out << "--";
-        break;
+        out << std::setw(6) << std::setfill(' ') << round_to(v.value);
+    }
+    else
+    {
+        out << "    --";
     }
     return out;
 }
@@ -41,14 +46,7 @@ std::ostream &operator<<(std::ostream &out, const Matrix &matrix)
     {
         for (auto &value : row)
         {
-            if (std::holds_alternative<int>(value))
-            {
-                out << std::setw(4) << std::setfill(' ') << std::get<int>(value);
-            }
-            else if (std::holds_alternative<Unknown>(value))
-            {
-                out << "  " << std::get<Unknown>(value);
-            }
+            out << value;
         }
         out << '\n';
     }
@@ -58,21 +56,14 @@ std::ostream &operator<<(std::ostream &out, const Matrix &matrix)
 std::ostream &operator<<(std::ostream &out, const Row &row)
 {
     out << "Matrix: (1 x " << row.size() << ")\n";
-    for (int i = 0; i < row.size(); i++)
+    for (size_t i = 0; i < row.size(); i++)
     {
-        out << "   " << (char)('a' + i);
+        out << "     " << (char)('a' + i);
     }
     out << '\n';
     for (auto &value : row)
     {
-        if (std::holds_alternative<int>(value))
-        {
-            out << std::setw(4) << std::setfill(' ') << std::get<int>(value);
-        }
-        else if (std::holds_alternative<Unknown>(value))
-        {
-            out << "  " << std::get<Unknown>(value);
-        }
+        out << value;
     }
     out << '\n';
     return out << '\n';
@@ -88,43 +79,19 @@ System solveAndPrint(const System &input)
 {
     System result = input;
 
-    printSystem(result);
-
-    for (int i = 0; i < result.coefficients.size(); i++)
-    {
-        for (int j = 0; j < result.coefficients[i].size(); j++)
-        {
-            if (std::holds_alternative<int>(result.coefficients[i][j]) && std::get<int>(result.coefficients[i][j]) != 0)
-            {
-                if (std::holds_alternative<int>(result.constant_terms[j]))
-                {
-                    result.coefficients[i][j] = std::get<int>(result.coefficients[i][j]) * std::get<int>(result.constant_terms[j]);
-                }
-                else if (std::get<int>(result.coefficients[i][j]) < 0)
-                {
-                    result.coefficients[i][j] = Unknown::NEGATIVE;
-                }
-                else
-                {
-                    result.coefficients[i][j] = Unknown::POSITIVE;
-                }
-            }
-        }
-    }
-
-    printSystem(result);
-
     bool changed = true;
     while (changed)
     {
         changed = false;
-        for (int i = 0; i < result.coefficients.size(); i++)
+        printSystem(result);
+
+        for (size_t i = 0; i < result.coefficients.size(); i++)
         {
-            int magic_n = 0;
-            int magic_i = 0;
-            for (int j = 0; j < result.coefficients[i].size(); j++)
+            size_t magic_n = 0;
+            size_t magic_i = 0;
+            for (size_t j = 0; j < result.coefficients[i].size(); j++)
             {
-                if (std::holds_alternative<Unknown>(result.coefficients[i][j]))
+                if (result.coefficients[i][j].value != 0 && result.constant_terms[j].is_unknown)
                 {
                     magic_n++;
                     magic_i = j;
@@ -133,43 +100,23 @@ System solveAndPrint(const System &input)
 
             if (magic_n == 1)
             {
-                int sum = 0;
-                for (int j = 0; j < result.coefficients[i].size(); j++)
+                double sum = 0;
+                for (size_t j = 0; j < result.coefficients[i].size(); j++)
                 {
-                    if (j != magic_i)
+                    if (j != magic_i && result.coefficients[i][j].value != 0)
                     {
-                        sum += std::get<int>(result.coefficients[i][j]);
+                        sum -= result.coefficients[i][j].value * result.constant_terms[j].value;
                     }
                 }
 
-                const bool is_negative = std::get<Unknown>(result.coefficients[i][magic_i]) == Unknown::NEGATIVE;
-                for (int j = 0; j < result.coefficients.size(); j++)
-                {
-                    if (std::holds_alternative<Unknown>(result.coefficients[j][magic_i]))
-                    {
-                        if (std::get<Unknown>(result.coefficients[j][magic_i]) == Unknown::POSITIVE)
-                        {
-                            result.coefficients[j][magic_i] = is_negative ? sum : -sum;
-                        }
-                        else
-                        {
-                            result.coefficients[j][magic_i] = is_negative ? -sum : sum;
-                        }
-                    }
-                }
-
-                if (std::holds_alternative<Unknown>(result.constant_terms[magic_i]))
-                {
-                    result.constant_terms[magic_i] = is_negative ? sum : -sum;
-                }
+                result.constant_terms[magic_i].value = sum / result.coefficients[i][magic_i].value;
+                result.constant_terms[magic_i].is_unknown = false;
 
                 changed = true;
                 break;
             }
         }
     }
-
-    printSystem(result);
 
     return result;
 }
@@ -182,6 +129,10 @@ int main(int argc, char const *argv[])
                                    "0 0 0 0 0 0 -1 -1 -1 1",
                                    "0",
                                    "10 7 - 3 2 3 - - - 14"});
+    // std::vector<std::string> args({"2 6 -8",
+    //                                "1 0 -1",
+    //                                "0",
+    //                                "2 - -"});
     System input;
     for (int i = 1;; i++)
     {
@@ -201,7 +152,8 @@ int main(int argc, char const *argv[])
         Row r;
         while (getline(ss, segment, ' '))
         {
-            r.push_back(stoi(segment));
+            r.push_back(Value());
+            r.back().value = stod(segment);
         }
         input.coefficients.push_back(r);
     }
@@ -217,13 +169,14 @@ int main(int argc, char const *argv[])
         std::string segment;
         while (getline(ss, segment, ' '))
         {
+            input.constant_terms.push_back(Value());
             if (segment == "-")
             {
-                input.constant_terms.push_back(Unknown::POSITIVE);
+                input.constant_terms.back().is_unknown = true;
             }
             else
             {
-                input.constant_terms.push_back(stoi(segment));
+                input.constant_terms.back().value = stod(segment);
             }
         }
     }
